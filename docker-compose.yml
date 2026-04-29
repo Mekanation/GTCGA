@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: gundam-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gundam
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gundam_change_me_in_env}
+      POSTGRES_DB: gundamtcg
+    # No listen_addresses override needed — postgres only talks to backend via internal network
+    # Port bound to 127.0.0.1 only so it's reachable from the host for imports but not from internet
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - gundam_pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gundam -d gundamtcg"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: gundam-backend
+    restart: unless-stopped
+    environment:
+      DB_DSN: postgresql://gundam:${POSTGRES_PASSWORD:-gundam_change_me_in_env}@postgres:5432/gundamtcg
+    # NOT exposed to host — only reachable by frontend container via internal network
+    expose:
+      - "8000"
+    volumes:
+      - gundam_images:/app/image_cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  frontend:
+    build: ./frontend
+    container_name: gundam-frontend
+    restart: unless-stopped
+    # Only port exposed to host — Cloudflare tunnel points here
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - backend
+    networks:
+      - internal
+
+volumes:
+  gundam_pgdata:
+  gundam_images:
+
+networks:
+  internal:
+    driver: bridge
